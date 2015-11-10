@@ -1,277 +1,252 @@
 <?php
 /**
  * PROCEDURA DI ESPORTAZIONE ORDINE PER PRODUTTORE "NOI E LA NATURA"
- * @version 0.2
+ * @version 0.3
  * 
- * Valido per la versione di iGruppi <= 1.4
+ * Valido per la versione di iGruppi 2.0
  */
+    // Define path to application directory
+    defined('APPLICATION_PATH')
+        || define('APPLICATION_PATH', realpath(dirname(__FILE__) . '/../'));
 
-  // set locale
-  setlocale(LC_TIME,"it_IT");
-  error_reporting(E_ALL);
+    // Define application environment
+    defined('APPLICATION_ENV')
+        || define('APPLICATION_ENV', (getenv('APPLICATION_ENV') ? getenv('APPLICATION_ENV') : 'production'));
 
-  /**
-   * Parametri di connessione al DB
-   */
-  $DB_HOST = 'localhost';
-  $DB_USER = 'root';
-  $DB_PASS = '';
-  $db_name = "igruppi";
+    // Ensure library/ is on include_path
+    set_include_path(implode(PATH_SEPARATOR, array(
+        realpath(APPLICATION_PATH),
+        realpath(APPLICATION_PATH . '/library'),
+        realpath(APPLICATION_PATH . '/resources')
+    )));
 
-  /***
-   * Idordine da passare come parametro URL
-   *    -> /get_csv_noielanatura.php?idordine=xx
-   */
-  if(!isset($_REQUEST["idordine"])) {
-      die("'idordine' parameter NOT exists!");
-  }
-  $idordine = $_REQUEST["idordine"];
+    // include and start autoloader
+    include_once("MyFw/Autoloader.php");
+    Autoloader::Register();
+    // Get Configuration file
+    $appConfig = new Zend_Config_Ini(APPLICATION_PATH . '/resources/Config/application.ini', APPLICATION_ENV);
+    Zend_Registry::set('appConfig', $appConfig);
+    // SET LOCALE
+    date_default_timezone_set('Europe/Rome');
+    setlocale(LC_TIME, 'it_IT');
 
-  // si connette al DB
-  $db = new mysqli ($DB_HOST, $DB_USER, $DB_PASS, $db_name);
-  if ($db->connect_error) {
-    die ("Connect to $db_name failed: (connect_errno=".$db->connect_errno.",connect_error=".$db->connect_error.")");
-  }
+    
+    // START DB
+    $db = new MyFw_DB();
+    
+    // Ragione sociale (FISSO per NOI E LA NATURA)
+    $ragione = "Noi e la Natura";
   
-  // check if ORDINE exists
-  $sth_check = $db->prepare("SELECT * FROM ordini WHERE idordine= ?");
-  $sth_check->bind_param('i',$idordine);
-  $sth_check->execute();
-  if (!$sth_check->fetch()) {
-    die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
-  }  
-  $sth_check->free_result();
 
-  // query sull'ordine fornitore
-  $query = "
-  select
-    ord.data_fine AS datachiusura,
-    ord.idproduttore AS idfornitore,
-    frn.ragsoc AS ragione
-  from
-    produttori       frn,
-    ordini ord
-  where
-    frn.idproduttore = ord.idproduttore and
-    ord.idordine = ?
-  " ;
+    /***
+     * Idordine da passare come parametro URL
+     *    -> /get_csv_noielanatura.php?idordine=xx&idgroup=xx
+     */
+    if(!isset($_REQUEST["idordine"])) {
+        die("'idordine' parameter NOT exists!");
+    }
+    $idordine = $_REQUEST["idordine"];
 
-  $statement = $db->prepare($query) ; 
-  if (!$statement) {
-    die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
-  }
-
-  $statement->bind_param('i',$idordine);
-  $statement->execute();
-
-  $statement->bind_result(
-    $datachiusura,
-    $idfornitore,
-    $ragione
-  ) ;
-
-  $statement->fetch() ;
-  $statement->free_result();
-
-
-  // query sui soci
-  $query = "
-  SELECT
-    u.iduser AS idsocio,
-    u.cognome,
-    u.nome,
-    sum(op.costo * oup.qta) as prezzo
-  FROM
-    users       u,
-    ordini_user_prodotti    oup,
-    ordini_prodotti        op
-  WHERE    
-    u.iduser = oup.iduser and
-    oup.idprodotto = op.idprodotto AND oup.idordine = op.idordine and
-    op.idordine = ?
-  group by
-    u.iduser
-  order by
-    u.iduser
-  " ;
+    if(!isset($_REQUEST["idgroup"])) {
+        die("'idgroup' parameter NOT exists!");
+    }
+    $idgroup = $_REQUEST["idgroup"];
   
-  $statement = $db->prepare($query) ; 
-  if (!$statement) {
-    die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
-  }
+  
+    // check if ORDINE exists and GET DATA
+    $q1 = "  SELECT g.nome, og.idordine
+             FROM ordini_groups AS og
+             JOIN groups AS g ON og.idgroup_slave= g.idgroup
+             WHERE og.idgroup_slave= :idgroup AND og.idordine= :idordine";
 
-  $statement->bind_param('i',$idordine);
-  $statement->execute();
+    $sth = $db->prepare($q1);
+    $sth->execute(array('idordine' => $idordine, 'idgroup' => $idgroup ));
+    if (!$res = $sth->fetch(PDO::FETCH_OBJ)) {
+      die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
+    }  
+    
+    // set nome del Gruppo
+    $descrizioneGroup = $res->nome;
 
-  $statement->bind_result(
-    $idsocio,
-    $cognome,
-    $nome,
-    $totale
-  ) ;
 
-  // costruisco l'header e l'elenco soci
-  $header = "Articolo;Descrizione;Confezione;Prezzo;Cartone;" ;
-  $elenco_soci = array() ;
-  $elenco_totali = array() ;
-  while($statement->fetch()) {
-    $header .= "$cognome $nome;" ;
-    $elenco_soci[$idsocio] = 0 ;
-    $elenco_totali[$idsocio] = $totale ;
-  }
-  $header .= "Gruppo" ;
+    // query sui soci
+    $query1 = "
+    SELECT
+      u.iduser AS idsocio,
+      u.cognome,
+      u.nome,
+      sum(op.costo_ordine * oup.qta_reale) as prezzo
+    FROM
+      users       u,
+      ordini_user_prodotti    oup,
+      ordini_prodotti        op
+    WHERE    
+      u.iduser = oup.iduser and
+      oup.idprodotto = op.idprodotto AND oup.idordine = op.idordine AND oup.idlistino=op.idlistino AND
+      op.idordine = :idordine
+    group by
+      u.iduser
+    order by
+      u.iduser
+    " ;
 
-  // stampa l'intestazione
-  // header('Content-Type: text/plain');
-  header('Content-Type: application/octet-stream');
-  header("Content-Transfer-Encoding: Binary"); 
-  header("Content-disposition: attachment; filename=\"$db_name-".strtolower(preg_replace("/[^a-zA-Z]/","",$ragione))."-$idordine.csv");
+    $statement = $db->prepare($query1) ; 
+    if (!$statement) {
+      die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
+    }
+    $statement->execute(array('idordine' => $idordine));
+    $resSoci = $statement->fetchAll(PDO::FETCH_OBJ);
 
-  echo "GAS Iqbal Masih - $db_name - ORDINE N.$idordine DEL $datachiusura ($ragione)\n" ; 
-  echo "\n" ;
-  echo "$header\n" ;
+    // costruisco l'header e l'elenco soci
+    $header = "Articolo;Descrizione;Confezione;Prezzo;Cartone;" ;
+    $elenco_soci = array();
+    $elenco_totali = array();
+    foreach($resSoci AS $socio) {
+      $header .= $socio->cognome . " ".$socio->nome.";";
+      $elenco_soci[$socio->idsocio] = 0;
+      $elenco_totali[$socio->idsocio] = $socio->prezzo;
+    }
+    $header .= "Gruppo";
 
-  $statement->free_result();
+    // stampa l'intestazione
+    // header('Content-Type: text/plain');
+    header('Content-Type: application/octet-stream');
+    header("Content-Transfer-Encoding: Binary"); 
+    header("Content-disposition: attachment; filename=\"".strtolower(preg_replace("/[^a-zA-Z]/","",$descrizioneGroup))."-NOIELANATURA-$idordine.csv");
 
-  // query sugli item
-  $query = "
-  SELECT
-    p.idprodotto,
-    p.codice,
-    p.descrizione,
-    p.udm AS tipoprezzo,
-    op.costo AS prezzo,
-    oup.iduser AS idsocio,
-    oup.qta as quantita
-  FROM
-    ordini_user_prodotti    oup
-    JOIN ordini_prodotti op ON oup.idprodotto = op.idprodotto AND oup.idordine=op.idordine
-    JOIN prodotti p ON oup.idprodotto = p.idprodotto
-  WHERE  
-    oup.idordine = ?
-  GROUP BY
-    oup.iduser, oup.idprodotto    
-  ORDER BY
-    oup.idprodotto, oup.iduser
-  " ;
-  $statement = $db->prepare($query) ; 
-  if (!$statement) {
-    die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
-  }
+    echo "$descrizioneGroup - ORDINE N. $idordine DEL ". date("d-m-Y H:i:s")."\n" ; 
+    echo "\n" ;
+    echo "$header\n" ;
 
-  $statement->bind_param('i',$idordine);
-  $statement->execute();
+    // query sugli item
+    $query2 = "
+    SELECT
+      p.idprodotto,
+      p.codice,
+      p.descrizione,
+      p.udm AS tipoprezzo,
+      op.costo_ordine AS prezzo,
+      oup.iduser AS idsocio,
+      oup.qta as quantita
+    FROM
+      ordini_user_prodotti    oup
+      JOIN ordini_prodotti op ON oup.idprodotto = op.idprodotto AND oup.idordine=op.idordine
+      JOIN prodotti p ON oup.idprodotto = p.idprodotto
+    WHERE  
+      oup.idordine = :idordine
+    GROUP BY
+      oup.iduser, oup.idprodotto    
+    ORDER BY
+      oup.idprodotto, oup.iduser
+    " ;
+    $statement2 = $db->prepare($query2) ; 
+    if (!$statement2) {
+      die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
+    }
+    $statement2->execute(array('idordine' => $idordine));
+    $resItem = $statement2->fetchAll(PDO::FETCH_OBJ);
 
-  $statement->bind_result(
-    $idprodotto,
-    $codice,
-    $descrizione,
-    $tipoprezzo,
-    $prezzo,
-    $idsocio,
-    $quantita
-  ) ;
 
-  // GOING THROUGH THE DATA
-
-  $idprodotto_old = -32767 ;
-  $codice_old = null;
-  $descrizione_old = null ;
-  $tipologia_old = null ;
-  $tipoprezzo_old = null ;
-  $prezzo_old = null ;
-  $quantita_arr = $elenco_soci ;
+    // GOING THROUGH THE DATA
+    $idprodotto_old = -32767 ;
+    $codice_old = null;
+    $descrizione_old = null ;
+    $tipologia_old = null ;
+    $tipoprezzo_old = null ;
+    $prezzo_old = null ;
+    $quantita_arr = $elenco_soci ;
   
 //    print_r($quantita_arr);die;
     
-  while ($statement->fetch()) {
+    foreach ($resItem AS $item) {
 
-    if ($idprodotto!=$idprodotto_old && $idprodotto_old>0) {
+        $idprodotto = $item->idprodotto;
+        $codice = $item->codice;
+        $descrizione = $item->descrizione;
+        $tipoprezzo = $item->tipoprezzo;
+        $prezzo = $item->prezzo;
+        $idsocio = $item->idsocio;
+        $quantita = $item->quantita;
 
-//      echo "FINE RIGA<br>";
+        if ($idprodotto!=$idprodotto_old && $idprodotto_old>0) {
 
-      // costruisce la riga
-      $row = "$descrizione_old;$ragione;$tipoprezzo_old;$prezzo_old;;" ;
-      $sum = 0 ;
-      foreach ($quantita_arr as $qta) {
-        $row .= "$qta;" ; 
-        $sum += $qta ;
-      }
-      $row .= $sum ;
+    //      echo "FINE RIGA<br>";
 
-      // stampa la riga
-      echo "$row\n" ;
+          // costruisce la riga
+          $row = "$descrizione_old;$ragione;$tipoprezzo_old;$prezzo_old;;" ;
+          $sum = 0 ;
+          foreach ($quantita_arr as $qta) {
+            $row .= "$qta;" ; 
+            $sum += $qta ;
+          }
+          $row .= $sum ;
 
-      // re-inzializza l'array delle quantit�
-      $quantita_arr = $elenco_soci ;
+          // stampa la riga
+          echo "$row\n" ;
 
-    }
-//      echo "prodotto=>$idprodotto socio=>$idsocio quantita=>$quantita <br>" ;
+          // re-inzializza l'array delle quantit�
+          $quantita_arr = $elenco_soci ;
 
-    $quantita_arr[$idsocio] = $quantita ;
-    
-    $codice_old = $codice;
-    $idprodotto_old = $idprodotto;
-    $descrizione_old = str_pad($codice_old, 5, "*", STR_PAD_RIGHT) . $descrizione;
-    $tipoprezzo_old = $tipoprezzo;
-    $prezzo_old = $prezzo;
+        }
+    //      echo "prodotto=>$idprodotto socio=>$idsocio quantita=>$quantita <br>" ;
+
+        $quantita_arr[$idsocio] = $quantita ;
+
+        $codice_old = $codice;
+        $idprodotto_old = $idprodotto;
+        $descrizione_old = str_pad($codice_old, 5, "*", STR_PAD_RIGHT) . $descrizione;
+        $tipoprezzo_old = $tipoprezzo;
+        $prezzo_old = $prezzo;
   	  
-  }
+    }
 
-  // costruisce e stampa l'ultima riga
-  $row = "$descrizione_old;$ragione;$tipoprezzo_old;$prezzo_old;;" ;
-  $sum = 0 ;
-  foreach ($quantita_arr as $qta) {
-    $row .= "$qta;" ; 
-    $sum += $qta ;
-  }
-  $row .= $sum ;
-  echo "$row\n" ;
+    // costruisce e stampa l'ultima riga
+    $row = "$descrizione_old;$ragione;$tipoprezzo_old;$prezzo_old;;" ;
+    $sum = 0 ;
+    foreach ($quantita_arr as $qta) {
+      $row .= "$qta;" ; 
+      $sum += $qta ;
+    }
+    $row .= $sum ;
+    echo "$row\n" ;
 
-  // stampa i subtotali (?)
-  $row = ";;;;SUBTOTALE;" ;
-  $sum = 0 ;
-  foreach ($elenco_totali as $totale) {
-    $row .= "$totale;" ;
-    $sum += $totale ;
-  }
-  $row .= $sum ;
-  echo "$row\n" ;
+    // stampa i subtotali (?)
+    $row = ";;;;SUBTOTALE;" ;
+    $sum = 0 ;
+    foreach ($elenco_totali as $totale) {
+      $row .= round($totale,2).";" ;
+      $sum += $totale ;
+    }
+    $row .= round($sum,2);
+    echo "$row\n" ;
 
-  // stampa i subtot. corr. (?)
-  $row = ";;;;SUBTOT. CORR.;" ;
-  $sum = 0 ;
-  foreach ($elenco_totali as $totale) {
-    $row .= "$totale;" ;
-    $sum += $totale ;
-  }
-  $row .= $sum ;
-  echo "$row\n" ;
+    // stampa i subtot. corr. (?)
+    $row = ";;;;SUBTOT. CORR.;" ;
+    $sum = 0 ;
+    foreach ($elenco_totali as $totale) {
+      $row .= round($totale,2).";" ;
+      $sum += $totale ;
+    }
+    $row .= round($sum,2);
+    echo "$row\n" ;
 
-  // stampa le spese acc. (?)
-  $row = ";;;;SPESE ACC.;" ;
-  $sum = 0 ;
-  foreach ($elenco_totali as $totale) {
-    $spese_acc = 0 ;
-    $row .= "$spese_acc;" ;
-    $sum += $spese_acc ;
-  }
-  $row .= $sum ;
-  echo "$row\n" ;
+    // stampa le spese acc. (?)
+    $row = ";;;;SPESE ACC.;" ;
+    $sum = 0 ;
+    foreach ($elenco_totali as $totale) {
+      $spese_acc = 0 ;
+      $row .= round($spese_acc,2).";" ;
+      $sum += $spese_acc ;
+    }
+    $row .= round($sum,2);
+    echo "$row\n" ;
 
-  // stampa i totali
-  $row = ";;;;TOTALE;" ;
-  $sum = 0 ;
-  foreach ($elenco_totali as $totale) {
-    $row .= "$totale;" ;
-    $sum += $totale ;
-  }
-  $row .= $sum ;
-  echo "$row\n" ;
-
-  $statement->free_result();
-
-  // CLOSE CONNECTION
-  mysqli_close ($db);
-
-?>
+    // stampa i totali
+    $row = ";;;;TOTALE;" ;
+    $sum = 0 ;
+    foreach ($elenco_totali as $totale) {
+      $row .= round($totale,2).";" ;
+      $sum += $totale ;
+    }
+    $row .= round($sum,2);
+    echo "$row\n" ;

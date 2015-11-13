@@ -79,11 +79,13 @@
     FROM
       users       u,
       ordini_user_prodotti    oup,
-      ordini_prodotti        op
+      ordini_prodotti        op,
+      users_group ug
     WHERE    
-      u.iduser = oup.iduser and
+      u.iduser = oup.iduser AND
+      u.iduser = ug.iduser AND
       oup.idprodotto = op.idprodotto AND oup.idordine = op.idordine AND oup.idlistino=op.idlistino AND
-      op.idordine = :idordine
+      op.idordine = :idordine AND ug.idgroup= :idgroup
     group by
       u.iduser
     order by
@@ -94,7 +96,7 @@
     if (!$statement) {
       die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
     }
-    $statement->execute(array('idordine' => $idordine));
+    $statement->execute(array('idordine' => $idordine, 'idgroup' => $idgroup ));
     $resSoci = $statement->fetchAll(PDO::FETCH_OBJ);
 
     // costruisco l'header e l'elenco soci
@@ -129,11 +131,12 @@
       oup.iduser AS idsocio,
       oup.qta as quantita
     FROM
-      ordini_user_prodotti    oup
+      ordini_user_prodotti AS oup
+      JOIN users_group AS ug ON oup.iduser=ug.iduser
       JOIN ordini_prodotti op ON oup.idprodotto = op.idprodotto AND oup.idordine=op.idordine
       JOIN prodotti p ON oup.idprodotto = p.idprodotto
     WHERE  
-      oup.idordine = :idordine
+      oup.idordine = :idordine AND ug.idgroup= :idgroup
     GROUP BY
       oup.iduser, oup.idprodotto    
     ORDER BY
@@ -143,7 +146,7 @@
     if (!$statement2) {
       die ("Prepare statement failed: errno=".$db->errno.", error=".$db->error);
     }
-    $statement2->execute(array('idordine' => $idordine));
+    $statement2->execute(array('idordine' => $idordine, 'idgroup' => $idgroup));
     $resItem = $statement2->fetchAll(PDO::FETCH_OBJ);
 
 

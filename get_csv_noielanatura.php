@@ -35,7 +35,7 @@
     $db = new MyFw_DB();
     
     // Ragione sociale (FISSO per NOI E LA NATURA)
-    $ragione = "Noi e la Natura";
+    $ragione = "--";
   
 
     /***
@@ -129,12 +129,14 @@
       p.udm AS tipoprezzo,
       op.costo_ordine AS prezzo,
       oup.iduser AS idsocio,
-      oup.qta as quantita
+      oup.qta as quantita,
+      pr.ragsoc
     FROM
       ordini_user_prodotti AS oup
       JOIN users_group AS ug ON oup.iduser=ug.iduser
       JOIN ordini_prodotti op ON oup.idprodotto = op.idprodotto AND oup.idordine=op.idordine
       JOIN prodotti p ON oup.idprodotto = p.idprodotto
+      JOIN produttori pr ON p.idproduttore = pr.idproduttore
     WHERE  
       oup.idordine = :idordine AND ug.idgroup= :idgroup
     GROUP BY
@@ -170,13 +172,14 @@
         $prezzo = $item->prezzo;
         $idsocio = $item->idsocio;
         $quantita = $item->quantita;
+        $produttore = $item->ragsoc;
 
         if ($idprodotto!=$idprodotto_old && $idprodotto_old>0) {
 
     //      echo "FINE RIGA<br>";
 
           // costruisce la riga
-          $row = "$descrizione_old;$ragione;$tipoprezzo_old;$prezzo_old;;" ;
+          $row = "$descrizione_old;$produttore;$tipoprezzo_old;$prezzo_old;;" ;
           $sum = 0 ;
           foreach ($quantita_arr as $qta) {
             $row .= "$qta;" ; 
@@ -204,7 +207,7 @@
     }
 
     // costruisce e stampa l'ultima riga
-    $row = "$descrizione_old;$ragione;$tipoprezzo_old;$prezzo_old;;" ;
+    $row = "$descrizione_old;$produttore;$tipoprezzo_old;$prezzo_old;;" ;
     $sum = 0 ;
     foreach ($quantita_arr as $qta) {
       $row .= "$qta;" ; 

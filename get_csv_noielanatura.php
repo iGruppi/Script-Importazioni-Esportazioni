@@ -142,7 +142,7 @@
     GROUP BY
       oup.iduser, oup.idprodotto    
     ORDER BY
-      oup.idprodotto, oup.iduser
+      p.idproduttore, oup.idprodotto, oup.iduser
     " ;
     $statement2 = $db->prepare($query2) ; 
     if (!$statement2) {

@@ -151,7 +151,6 @@
     $statement2->execute(array('idordine' => $idordine, 'idgroup' => $idgroup));
     $resItem = $statement2->fetchAll(PDO::FETCH_OBJ);
 
-
     // GOING THROUGH THE DATA
     $idprodotto_old = -32767 ;
     $codice_old = null;
@@ -161,7 +160,7 @@
     $prezzo_old = null ;
     $quantita_arr = $elenco_soci ;
   
-//    print_r($quantita_arr);die;
+    //echo "<pre>"; print_r($resItem);die;
     
     foreach ($resItem AS $item) {
 
@@ -179,7 +178,7 @@
     //      echo "FINE RIGA<br>";
 
           // costruisce la riga
-          $row = "$descrizione_old;$produttore;$tipoprezzo_old;$prezzo_old;;" ;
+          $row = "$descrizione_old;$produttore_old;$tipoprezzo_old;$prezzo_old;;" ;
           $sum = 0 ;
           foreach ($quantita_arr as $qta) {
             $row .= "$qta;" ; 
@@ -203,11 +202,11 @@
         $descrizione_old = str_pad($codice_old, 5, "*", STR_PAD_RIGHT) . $descrizione;
         $tipoprezzo_old = $tipoprezzo;
         $prezzo_old = $prezzo;
-  	  
+  	$produttore_old = $produttore;
     }
 
     // costruisce e stampa l'ultima riga
-    $row = "$descrizione_old;$produttore;$tipoprezzo_old;$prezzo_old;;" ;
+    $row = "$descrizione_old;$produttore_old;$tipoprezzo_old;$prezzo_old;;" ;
     $sum = 0 ;
     foreach ($quantita_arr as $qta) {
       $row .= "$qta;" ; 
